@@ -11,9 +11,10 @@ usage() {
   exitcode="$1"
   cat << USAGE >&2
 Usage:
-  $cmdname host:port [-t timeout] [-- command args]
+  $cmdname host:port [-t timeout] [-b buffer] [-- command args]
   -q | --quiet                        Do not output any status messages
   -t TIMEOUT | --timeout=timeout      Timeout in seconds, zero for no timeout
+  -b BUFFER | --buffer=buffer         A period of time to wait before completing (does not effect timeout)
   -- COMMAND ARGS                     Execute command with args after the test finishes
 USAGE
   exit "$exitcode"
@@ -25,18 +26,33 @@ wait_for() {
     exit 1
   fi
 
+  success=false
+
   for i in `seq $TIMEOUT` ; do
     nc -z "$HOST" "$PORT" > /dev/null 2>&1
     
-    result=$?
-    if [ $result -eq 0 ] ; then
-      if [ $# -gt 0 ] ; then
-        exec "$@"
-      fi
-      exit 0
+    nc_result=$? # exit status of the last executed command *0* being success
+    if [ $nc_result -eq 0 ] ; then # if success then the host:port is now accepting requests
+      success=true
+      break
     fi
     sleep 1
   done
+
+  # If successful then attempt to complete
+  if [ "$success" = "true" ] ; then
+
+    # If there is a buffer set then sleep before attempting to run command
+    [ ! -z "$BUFFER" ] && sleep `seq $BUFFER`
+
+    # If there are arguments passed after -- then exec them, otherwise simply exit sucessfully
+    if [ $# -gt 0 ] ; then 
+      exec "$@"
+    else
+      exit 0
+    fi
+  fi
+
   echo "Operation timed out" >&2
   exit 1
 }
@@ -61,10 +77,19 @@ do
     --timeout=*)
     TIMEOUT="${1#*=}"
     shift 1
+        ;;
+    -b)
+    BUFFER="$2"
+    if [ "$BUFFER" = "" ]; then break; fi
+    shift 2
+    ;;
+    --buffer=*)
+    BUFFER="${1#*=}"
+    shift 1
     ;;
     --)
     shift
-    break
+    break # Anything after this is the args to run after successfully hitting the host:port so leave it (dont shift anymore)
     ;;
     --help)
     usage 0
