@@ -1,10 +1,16 @@
 #!/bin/sh
 
 TIMEOUT=15
+BUFFER=0
 QUIET=0
+VERBOSE=0
 
 echoerr() {
   if [ "$QUIET" -ne 1 ]; then printf "%s\n" "$*" 1>&2; fi
+}
+
+echomsg() {
+  if [ "$QUIET" -ne 1 ] && [ "$VERBOSE" -eq 1 ]; then printf "%s\n" "$*" 1>&2; fi
 }
 
 usage() {
@@ -13,6 +19,7 @@ usage() {
 Usage:
   $cmdname host:port [-t timeout] [-b buffer] [-- command args]
   -q | --quiet                        Do not output any status messages
+  -v | --verbose                        Extra status messages (--quiet takes precedence)
   -t TIMEOUT | --timeout=timeout      Timeout in seconds, zero for no timeout
   -b BUFFER | --buffer=buffer         A period of time to wait before completing (does not effect timeout)
   -- COMMAND ARGS                     Execute command with args after the test finishes
@@ -26,12 +33,14 @@ wait_for() {
     exit 1
   fi
 
+  echomsg "Starting Wait: $HOST $PORT [-t $TIMEOUT] [-b $BUFFER]"
+
   success=false
 
   for i in `seq $TIMEOUT` ; do
     nc -z "$HOST" "$PORT" > /dev/null 2>&1
     
-    nc_result=$? # exit status of the last executed command *0* being success
+    nc_result=$? # exit status of the last executed command: *0* being success
     if [ $nc_result -eq 0 ] ; then # if success then the host:port is now accepting requests
       success=true
       break
@@ -39,21 +48,28 @@ wait_for() {
     sleep 1
   done
 
+  [ "$success" = "true" ] && echomsg "Status: Successful"
+
   # If successful then attempt to complete
   if [ "$success" = "true" ] ; then
 
     # If there is a buffer set then sleep before attempting to run command
-    [ ! -z "$BUFFER" ] && sleep `seq $BUFFER`
+    if [ "$BUFFER" -ne 0 ] ; then
+      echomsg "Starting buffer: $BUFFER second(s)" 
+      sleep $BUFFER
+    fi
+
+    echomsg "Status: Completed Wait"
 
     # If there are arguments passed after -- then exec them, otherwise simply exit sucessfully
     if [ $# -gt 0 ] ; then 
       exec "$@"
-    else
-      exit 0
     fi
+
+    exit 0
   fi
 
-  echo "Operation timed out" >&2
+  echoerr "Status: Timed Out" >&2
   exit 1
 }
 
@@ -67,6 +83,10 @@ do
     ;;
     -q | --quiet)
     QUIET=1
+    shift 1
+    ;;
+    -v | --verbose)
+    VERBOSE=1
     shift 1
     ;;
     -t)
